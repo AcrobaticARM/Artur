@@ -143,6 +143,26 @@
             text-overflow: ellipsis;
         }
 
+        /* Payment status select colors */
+        .pay-select {
+            font-weight: bold;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 6px;
+            color: white;
+            cursor: pointer;
+        }
+        .pay-select.unpaid {
+            background-color: #dc3545;
+        }
+        .pay-select.paid {
+            background-color: #28a745;
+        }
+        .pay-select option {
+            color: #333;
+            background: white;
+        }
+
         /* Modal Styles */
         .modal {
             position: fixed;
@@ -481,7 +501,7 @@
                         </select>
                     </div>
 
-                    <select id="pay-${student.id}">
+                    <select id="pay-${student.id}" class="pay-select ${isPaid ? 'paid' : 'unpaid'}">
                         <option value="false" ${!isPaid ? 'selected' : ''}>Չվճարված</option>
                         <option value="true" ${isPaid ? 'selected' : ''}>Վճարված</option>
                     </select>
@@ -505,6 +525,14 @@
                 </div>
             `;
             childrenList.appendChild(row);
+
+            // Վճարման select-ի գույնը փոխվում է անմիջապես ընտրության պահին
+            const paySelectEl = document.getElementById(`pay-${student.id}`);
+            paySelectEl.addEventListener('change', () => {
+                const nowPaid = paySelectEl.value === "true";
+                paySelectEl.classList.toggle('paid', nowPaid);
+                paySelectEl.classList.toggle('unpaid', !nowPaid);
+            });
 
             // Ինֆո Կոճակ` ցույց է տալիս ծնողի գրանցած ԲՈԼՈՐ տվյալները (առանց նկարի, նկարը մնում է իր տեղում)
             document.getElementById(`info-${student.id}`).addEventListener('click', () => {
@@ -623,6 +651,10 @@
                             metaDiv.textContent = newGroupLabel || 'Խումբը դեռ նշանակված չէ';
                         }
                     }
+
+                    // Ապահովում ենք որ վճարման select-ի գույնը ճիշտ է պահպանումից հետո
+                    paySelectEl.classList.toggle('paid', payStatus);
+                    paySelectEl.classList.toggle('unpaid', !payStatus);
 
                     // Մաքրում ենք հաճախման select-ը
                     document.getElementById(`att-${student.id}`).value = "";
