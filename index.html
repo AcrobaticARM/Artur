@@ -58,6 +58,20 @@
             color: white;
             border-color: #007bff;
         }
+        .sidebar-divider {
+            border: none;
+            border-top: 1px solid #eee;
+            margin: 12px 0;
+        }
+        .btn-payments-list {
+            background: #17a2b8;
+            color: white;
+            border-color: #17a2b8;
+        }
+        .btn-payments-list:hover {
+            background: #138496;
+            border-color: #138496;
+        }
         /* Content Area */
         .content {
             flex: 1;
@@ -198,6 +212,55 @@
         .info-table td:first-child { font-weight: bold; color: #555; width: 40%; }
         #groupList li { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #eee; }
         #groupList .btn-delete { width: 24px; height: 24px; font-size: 12px; }
+
+        /* Payments list modal */
+        .payments-filters {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        .payments-filters select {
+            flex: 1;
+            min-width: 140px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        #paymentsList {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            max-height: 420px;
+            overflow-y: auto;
+        }
+        #paymentsList li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .payment-name {
+            font-weight: bold;
+        }
+        .payment-group {
+            color: #999;
+            font-size: 12px;
+            font-weight: normal;
+        }
+        .payment-date-badge {
+            color: #28a745;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        #paymentsCount {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
@@ -213,6 +276,8 @@
         <button class="filter-btn active" data-filter="all">Բոլորը</button>
         <button class="filter-btn" data-filter="unassigned">Չնշանակված</button>
         <div id="groupFilters"></div>
+        <hr class="sidebar-divider">
+        <button class="filter-btn btn-payments-list" id="openPaymentsModalBtn">✅ Վճարածների Ցուցակ</button>
     </div>
 
     <div class="content">
@@ -294,6 +359,23 @@
     </div>
 </div>
 
+<div class="modal hidden" id="paymentsModal">
+    <div class="modal-content" style="max-width: 650px;">
+        <span class="close-modal" id="closePaymentsModalBtn">&times;</span>
+        <h3>✅ Վճարած Երեխաների Ցուցակ</h3>
+        <div class="payments-filters">
+            <select id="paymentsGroupFilter">
+                <option value="all">Բոլոր Խմբերը</option>
+            </select>
+            <select id="paymentsMonthFilter">
+                <option value="all">Բոլոր Ամիսները</option>
+            </select>
+        </div>
+        <div id="paymentsCount"></div>
+        <ul id="paymentsList"></ul>
+    </div>
+</div>
+
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -326,6 +408,13 @@
     const groupFilters = document.getElementById('groupFilters');
     const groupModal = document.getElementById('groupModal');
     const groupList = document.getElementById('groupList');
+    const paymentsModal = document.getElementById('paymentsModal');
+    const paymentsGroupFilter = document.getElementById('paymentsGroupFilter');
+    const paymentsMonthFilter = document.getElementById('paymentsMonthFilter');
+    const paymentsList = document.getElementById('paymentsList');
+    const paymentsCount = document.getElementById('paymentsCount');
+
+    const MONTH_NAMES_HY = ['Հունվար','Փետրվար','Մարտ','Ապրիլ','Մայիս','Հունիս','Հուլիս','Օգոստոս','Սեպտեմբեր','Հոկտեմբեր','Նոյեմբեր','Դեկտեմբեր'];
 
     // --- Նկարի սեղմման/փոքրացման ֆունկցիա (Client-side resize) ---
     function resizeImage(file, maxSize = 1000, quality = 0.8) {
@@ -680,8 +769,10 @@
     // Ֆիլտրերի սեղմման իրադարձություն (delegation, քանի որ խմբային ֆիլտրերը դինամիկ են)
     document.querySelector('.sidebar').addEventListener('click', (e) => {
         const btn = e.target.closest('.filter-btn');
-        if (!btn) return;
-        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        if (!btn || btn.id === 'openPaymentsModalBtn') return;
+        document.querySelectorAll('.filter-btn').forEach(b => {
+            if (b.id !== 'openPaymentsModalBtn') b.classList.remove('active');
+        });
         btn.classList.add('active');
         currentFilter = btn.getAttribute('data-filter');
         renderList();
@@ -708,6 +799,114 @@
     document.getElementById('closeAddModalBtn').addEventListener('click', () => addModal.classList.add('hidden'));
     document.getElementById('closeHistoryModalBtn').addEventListener('click', () => document.getElementById('historyModal').classList.add('hidden'));
     document.getElementById('closeInfoModalBtn').addEventListener('click', () => document.getElementById('infoModal').classList.add('hidden'));
+
+    // --- Վճարածների Ցուցակ (ըստ ամսվա և խմբի) ---
+
+    // Ամսաթվի string-ից (dd.mm.yyyy, ինչպես toLocaleDateString('hy-AM') է տալիս) ստանում ենք "yyyy-mm" բանալի
+    function getMonthKeyFromDateStr(dateStr) {
+        if (!dateStr) return null;
+        const parts = dateStr.trim().split('.');
+        if (parts.length !== 3) return null;
+        const [d, m, y] = parts;
+        if (!y || !m) return null;
+        return `${y}-${m.padStart(2, '0')}`;
+    }
+
+    function monthKeyToLabel(key) {
+        const [year, month] = key.split('-');
+        const idx = parseInt(month, 10) - 1;
+        const name = MONTH_NAMES_HY[idx] || month;
+        return `${name} ${year}`;
+    }
+
+    // Հավաքում ենք բոլոր վճարումները՝ յուրաքանչյուր վճարման օրվա համար մեկ առանձին տող
+    function getAllPaymentEntries() {
+        const entries = [];
+        allStudents.forEach(student => {
+            const payments = student.payments || [];
+            payments.forEach(dateStr => {
+                entries.push({
+                    name: `${student.childName || ''} ${student.childSurname || ''}`.trim(),
+                    date: dateStr,
+                    monthKey: getMonthKeyFromDateStr(dateStr),
+                    groupId: student.groupId || '',
+                    groupLabel: student.groupLabel || 'Առանց խմբի'
+                });
+            });
+        });
+        return entries;
+    }
+
+    function populatePaymentsFilters() {
+        // Խմբերի ֆիլտր
+        paymentsGroupFilter.innerHTML = '<option value="all">Բոլոր Խմբերը</option>';
+        groupsCache.forEach(g => {
+            const o = document.createElement('option');
+            o.value = g.id;
+            o.textContent = g.label;
+            paymentsGroupFilter.appendChild(o);
+        });
+
+        // Ամիսների ֆիլտր (միայն այն ամիսները, որտեղ իրական վճարումներ կան)
+        const allEntries = getAllPaymentEntries();
+        const monthKeys = [...new Set(allEntries.map(e => e.monthKey).filter(Boolean))];
+        monthKeys.sort().reverse();
+
+        paymentsMonthFilter.innerHTML = '<option value="all">Բոլոր Ամիսները</option>';
+        monthKeys.forEach(key => {
+            const o = document.createElement('option');
+            o.value = key;
+            o.textContent = monthKeyToLabel(key);
+            paymentsMonthFilter.appendChild(o);
+        });
+    }
+
+    function renderPaymentsList() {
+        const groupVal = paymentsGroupFilter.value;
+        const monthVal = paymentsMonthFilter.value;
+
+        let entries = getAllPaymentEntries();
+
+        if (groupVal !== 'all') {
+            entries = entries.filter(e => e.groupId === groupVal);
+        }
+        if (monthVal !== 'all') {
+            entries = entries.filter(e => e.monthKey === monthVal);
+        }
+
+        // Դասավորում ենք ամսաթվով՝ ամենավերջինը վերևում
+        entries.sort((a, b) => {
+            const da = (a.date || '').split('.').reverse().join('-');
+            const db_ = (b.date || '').split('.').reverse().join('-');
+            return db_.localeCompare(da);
+        });
+
+        paymentsCount.textContent = `Ընդամենը՝ ${entries.length} վճարում`;
+        paymentsList.innerHTML = '';
+
+        if (entries.length === 0) {
+            paymentsList.innerHTML = "<li style='color:#777; justify-content:center;'>Վճարումներ չեն գտնվել</li>";
+            return;
+        }
+
+        entries.forEach(e => {
+            const li = document.createElement('li');
+            li.innerHTML = `
+                <span class="payment-name">${e.name} <span class="payment-group">(${e.groupLabel})</span></span>
+                <span class="payment-date-badge">✅ ${e.date}</span>
+            `;
+            paymentsList.appendChild(li);
+        });
+    }
+
+    document.getElementById('openPaymentsModalBtn').addEventListener('click', () => {
+        populatePaymentsFilters();
+        renderPaymentsList();
+        paymentsModal.classList.remove('hidden');
+    });
+    document.getElementById('closePaymentsModalBtn').addEventListener('click', () => paymentsModal.classList.add('hidden'));
+    paymentsGroupFilter.addEventListener('change', renderPaymentsList);
+    paymentsMonthFilter.addEventListener('change', renderPaymentsList);
 
     // Նոր երեխայի գրանցում մոդալից (Cloudinary + Firestore)
     document.getElementById('registrationForm').addEventListener('submit', async (e) => {
